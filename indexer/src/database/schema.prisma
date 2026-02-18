@@ -1,0 +1,74 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Transaction {
+  id          String   @id @default(cuid())
+  hash        String   @unique
+  blockNumber BigInt
+  fromAddress String
+  toAddress   String?
+  value       String   // wei as string to preserve BigInt precision
+  gasPrice    String
+  gasUsed     String?
+  input       String?  // calldata hex
+  nonce       Int
+  success     Boolean
+  createdAt   DateTime @default(now())
+
+  @@index([blockNumber])
+  @@index([success])
+  @@index([fromAddress])
+}
+
+model TokenTransfer {
+  id           String   @id @default(cuid())
+  hash         String
+  tokenAddress String
+  fromAddress  String
+  toAddress    String
+  amount       String   // raw token units as string
+  logIndex     Int
+  blockNumber  BigInt
+  createdAt    DateTime @default(now())
+
+  @@index([hash])
+  @@index([tokenAddress])
+  @@index([fromAddress])
+  @@index([blockNumber])
+}
+
+model LargeTransfer {
+  id          String    @id @default(cuid())
+  hash        String    @unique
+  fromAddress String
+  toAddress   String
+  valueWei    String
+  blockNumber BigInt
+  blockTime   DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@index([fromAddress])
+  @@index([toAddress])
+  @@index([blockNumber])
+}
+
+model FailedTransaction {
+  id           String   @id @default(cuid())
+  hash         String   @unique
+  blockNumber  BigInt
+  fromAddress  String
+  toAddress    String?
+  gasUsed      String?
+  revertReason String?
+  input        String?
+  createdAt    DateTime @default(now())
+
+  @@index([blockNumber])
+  @@index([fromAddress])
+}
