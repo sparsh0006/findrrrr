@@ -54,13 +54,13 @@ export function DashboardClient() {
     }
   }, []);
 
-  useEffect(() => {
-    fetchAll(); // initial fetch
-    intervalRef.current = setInterval(fetchAll, POLL_INTERVAL_MS);
-    return () => {
-      if (intervalRef.current) clearInterval(intervalRef.current);
-    };
-  }, [fetchAll]);
+useEffect(() => {
+  fetchAll(); // initial fetch
+  intervalRef.current = setInterval(fetchAll, POLL_INTERVAL_MS); // Refreshes every 5 seconds
+  return () => {
+    if (intervalRef.current) clearInterval(intervalRef.current);
+  };
+}, [fetchAll]);
 
   const pieData = stats
     ? [

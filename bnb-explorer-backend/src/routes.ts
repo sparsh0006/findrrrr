@@ -1,7 +1,6 @@
 import { Express, Request, Response } from "express";
 import { PrismaClient } from "@prisma/client";
 
-// ─── Known DeFi contract addresses (lowercase) ────────────────────────
 const DEFI_ADDRESSES = [
   "0x10ed43c718714eb63d5aa57b78b54704e256024e",
   "0x13f4ea83d0bd40e75c8222255bc855a974568dd4",
@@ -24,7 +23,6 @@ function paginate(query: any) {
   return { page, limit, skip: (page - 1) * limit };
 }
 
-// ─── FIX: Handle Date, BigInt, and nested objects properly ─────────────
 function serialize(obj: any): any {
   if (obj === null || obj === undefined) return obj;
   if (typeof obj === "bigint") return obj.toString();
@@ -41,9 +39,8 @@ function serialize(obj: any): any {
 }
 
 export function createRoutes(app: Express, prisma: PrismaClient) {
-  // ═══════════════════════════════════════════════════════════════════
+
   // GET /stats
-  // ═══════════════════════════════════════════════════════════════════
   app.get("/stats", async (_req: Request, res: Response) => {
     try {
       const [totalTransactions, successfulTransactions, failedTransactions, largeTransfers, tokenTransfers, latestTx] =
@@ -53,39 +50,29 @@ export function createRoutes(app: Express, prisma: PrismaClient) {
           prisma.failedTransaction.count(),
           prisma.largeTransfer.count(),
           prisma.tokenTransfer.count(),
-          prisma.transaction.findFirst({ orderBy: { blockNumber: "desc" }, select: { blockNumber: true } }),
+          prisma.transaction.findFirst({ orderBy: [{ blockNumber: "desc" }, { createdAt: "desc" }], select: { blockNumber: true } }),
         ]);
 
-      res.json(
-        serialize({
-          totalTransactions,
-          successfulTransactions,
-          failedTransactions,
-          largeTransfers,
-          tokenTransfers,
-          latestBlock: latestTx?.blockNumber || 0,
-        })
-      );
+      res.json(serialize({
+        totalTransactions, successfulTransactions, failedTransactions,
+        largeTransfers, tokenTransfers,
+        latestBlock: latestTx?.blockNumber || 0,
+      }));
     } catch (error) {
       console.error("Error fetching stats:", error);
       res.status(500).json({ error: "Failed to fetch stats" });
     }
   });
 
-  // ═══════════════════════════════════════════════════════════════════
   // GET /chart/blocks
-  // ═══════════════════════════════════════════════════════════════════
   app.get("/chart/blocks", async (_req: Request, res: Response) => {
     try {
       const latestTx = await prisma.transaction.findFirst({
-        orderBy: { blockNumber: "desc" },
+        orderBy: [{ blockNumber: "desc" }, { createdAt: "desc" }],
         select: { blockNumber: true },
       });
 
-      if (!latestTx) {
-        res.json([]);
-        return;
-      }
+      if (!latestTx) { res.json([]); return; }
 
       const latestBlock = Number(latestTx.blockNumber);
       const startBlock = latestBlock - 29;
@@ -105,23 +92,19 @@ export function createRoutes(app: Express, prisma: PrismaClient) {
 
       const failedMap = new Map(failedBlocks.map((b) => [Number(b.blockNumber), b._count.id]));
 
-      const chartData = blocks.map((b) => ({
+      res.json(blocks.map((b) => ({
         block: Number(b.blockNumber),
         txCount: b._count.id,
         failed: failedMap.get(Number(b.blockNumber)) || 0,
         gasAvg: 0,
-      }));
-
-      res.json(chartData);
+      })));
     } catch (error) {
       console.error("Error fetching chart data:", error);
       res.status(500).json({ error: "Failed to fetch chart data" });
     }
   });
 
-  // ═══════════════════════════════════════════════════════════════════
-  // GET /transactions
-  // ═══════════════════════════════════════════════════════════════════
+  // GET /transactions — NEWEST FIRST on page 1
   app.get("/transactions", async (req: Request, res: Response) => {
     try {
       const { page, limit, skip } = paginate(req.query);
@@ -141,9 +124,7 @@ export function createRoutes(app: Express, prisma: PrismaClient) {
         }
       }
 
-      if (defi) {
-        where.toAddress = { in: DEFI_ADDRESSES };
-      }
+      if (defi) { where.toAddress = { in: DEFI_ADDRESSES }; }
 
       if (tokens) {
         const tokenList = tokens.split(",").map((t) => t.trim().toUpperCase());
@@ -152,15 +133,15 @@ export function createRoutes(app: Express, prisma: PrismaClient) {
         }
       }
 
-      const [data, total] = await Promise.all([
-        prisma.transaction.findMany({
-          where,
-          orderBy: { blockNumber: "desc" },
-          skip,
-          take: limit,
-        }),
-        prisma.transaction.count({ where }),
-      ]);
+const [data, total] = await Promise.all([
+  prisma.transaction.findMany({
+    where,
+    orderBy: { createdAt: "desc" }, // <--- This ensures newest is at the top
+    skip,
+    take: limit,
+  }),
+  prisma.transaction.count({ where }),
+]);
 
       res.json(serialize({ data, total, page }));
     } catch (error) {
@@ -169,9 +150,7 @@ export function createRoutes(app: Express, prisma: PrismaClient) {
     }
   });
 
-  // ═══════════════════════════════════════════════════════════════════
-  // GET /token-transfers
-  // ═══════════════════════════════════════════════════════════════════
+  // GET /token-transfers — NEWEST FIRST
   app.get("/token-transfers", async (req: Request, res: Response) => {
     try {
       const { page, limit, skip } = paginate(req.query);
@@ -184,29 +163,24 @@ export function createRoutes(app: Express, prisma: PrismaClient) {
         if (search.startsWith("0x") && search.length === 66) {
           where.hash = search;
         } else if (search.startsWith("0x") && search.length === 42) {
-          where.OR = [
-            { fromAddress: search },
-            { toAddress: search },
-            { tokenAddress: search },
-          ];
+          where.OR = [{ fromAddress: search }, { toAddress: search }, { tokenAddress: search }];
         }
       }
 
       if (tokens) {
         const tokenList = tokens.split(",").map((t) => t.trim().toUpperCase());
         const addresses = tokenList.map((t) => TOKEN_ADDRESSES[t]).filter(Boolean);
-        if (addresses.length > 0) {
-          where.tokenAddress = { in: addresses };
-        }
+        if (addresses.length > 0) { where.tokenAddress = { in: addresses }; }
       }
 
       const [data, total] = await Promise.all([
-        prisma.tokenTransfer.findMany({
-          where,
-          orderBy: { blockNumber: "desc" },
-          skip,
-          take: limit,
-        }),
+  // Around line 204
+prisma.tokenTransfer.findMany({
+  where,
+  orderBy: { createdAt: "desc" }, // Add/Update this
+  skip,
+  take: limit,
+}),
         prisma.tokenTransfer.count({ where }),
       ]);
 
@@ -217,9 +191,7 @@ export function createRoutes(app: Express, prisma: PrismaClient) {
     }
   });
 
-  // ═══════════════════════════════════════════════════════════════════
-  // GET /large-transfers
-  // ═══════════════════════════════════════════════════════════════════
+  // GET /large-transfers — NEWEST FIRST
   app.get("/large-transfers", async (req: Request, res: Response) => {
     try {
       const { page, limit, skip } = paginate(req.query);
@@ -236,12 +208,14 @@ export function createRoutes(app: Express, prisma: PrismaClient) {
       }
 
       const [data, total] = await Promise.all([
-        prisma.largeTransfer.findMany({
-          where,
-          orderBy: { blockNumber: "desc" },
-          skip,
-          take: limit,
-        }),
+// Around line 239
+prisma.largeTransfer.findMany({
+  where,
+  orderBy: { blockNumber: "desc" }, // If blockNumber is same, you can use:
+  // orderBy: { createdAt: "desc" }, 
+  skip,
+  take: limit,
+}),
         prisma.largeTransfer.count({ where }),
       ]);
 
@@ -252,9 +226,7 @@ export function createRoutes(app: Express, prisma: PrismaClient) {
     }
   });
 
-  // ═══════════════════════════════════════════════════════════════════
-  // GET /failed-transactions
-  // ═══════════════════════════════════════════════════════════════════
+  // GET /failed-transactions — NEWEST FIRST
   app.get("/failed-transactions", async (req: Request, res: Response) => {
     try {
       const { page, limit, skip } = paginate(req.query);
@@ -273,7 +245,7 @@ export function createRoutes(app: Express, prisma: PrismaClient) {
       const [data, total] = await Promise.all([
         prisma.failedTransaction.findMany({
           where,
-          orderBy: { blockNumber: "desc" },
+          orderBy: [{ blockNumber: "desc" }, { createdAt: "desc" }],
           skip,
           take: limit,
         }),
@@ -287,9 +259,7 @@ export function createRoutes(app: Express, prisma: PrismaClient) {
     }
   });
 
-  // ═══════════════════════════════════════════════════════════════════
   // GET /tx/:hash
-  // ═══════════════════════════════════════════════════════════════════
   app.get("/tx/:hash", async (req: Request, res: Response) => {
     try {
       const { hash } = req.params;
@@ -299,10 +269,7 @@ export function createRoutes(app: Express, prisma: PrismaClient) {
         prisma.tokenTransfer.findMany({ where: { hash }, orderBy: { logIndex: "asc" } }),
       ]);
 
-      if (!tx) {
-        res.status(404).json({ error: "Transaction not found" });
-        return;
-      }
+      if (!tx) { res.status(404).json({ error: "Transaction not found" }); return; }
 
       res.json(serialize({ ...tx, tokenTransfers }));
     } catch (error) {
@@ -311,9 +278,7 @@ export function createRoutes(app: Express, prisma: PrismaClient) {
     }
   });
 
-  // ═══════════════════════════════════════════════════════════════════
   // GET /address/:address
-  // ═══════════════════════════════════════════════════════════════════
   app.get("/address/:address", async (req: Request, res: Response) => {
     try {
       const { address } = req.params;
@@ -324,20 +289,14 @@ export function createRoutes(app: Express, prisma: PrismaClient) {
         }),
         prisma.transaction.findMany({
           where: { OR: [{ fromAddress: address }, { toAddress: address }] },
-          orderBy: { blockNumber: "desc" },
+          orderBy: [{ blockNumber: "desc" }, { createdAt: "desc" }],
           take: 25,
         }),
-        prisma.transaction.findMany({
-          where: { fromAddress: address },
-          select: { value: true },
-        }),
-        prisma.transaction.findMany({
-          where: { toAddress: address },
-          select: { value: true },
-        }),
+        prisma.transaction.findMany({ where: { fromAddress: address }, select: { value: true } }),
+        prisma.transaction.findMany({ where: { toAddress: address }, select: { value: true } }),
         prisma.tokenTransfer.findMany({
           where: { OR: [{ fromAddress: address }, { toAddress: address }] },
-          orderBy: { blockNumber: "desc" },
+          orderBy: [{ blockNumber: "desc" }, { createdAt: "desc" }],
           take: 50,
         }),
       ]);
@@ -374,16 +333,12 @@ export function createRoutes(app: Express, prisma: PrismaClient) {
           balance: bal.toString(),
         }));
 
-      res.json(
-        serialize({
-          address,
-          txCount,
-          totalSent: totalSent.toString(),
-          totalReceived: totalReceived.toString(),
-          transactions,
-          tokenBalances,
-        })
-      );
+      res.json(serialize({
+        address, txCount,
+        totalSent: totalSent.toString(),
+        totalReceived: totalReceived.toString(),
+        transactions, tokenBalances,
+      }));
     } catch (error) {
       console.error("Error fetching address:", error);
       res.status(500).json({ error: "Failed to fetch address" });
