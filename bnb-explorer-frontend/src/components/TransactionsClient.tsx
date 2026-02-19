@@ -331,12 +331,30 @@ export function TransactionsClient({
                   </div>
                 </div>
                 {tokenFilters[key]?.enabled && (
-                  <div style={{ display: "flex", gap: 6, marginTop: 6, padding: "0 4px" }}>
-                    <input value={tokenFilters[key].min} onChange={(e) => setTokenFilters((p) => ({ ...p, [key]: { ...p[key], min: e.target.value } }))} placeholder="Min" type="number"
-                      style={{ flex: 1, background: "#0d1117", border: "1px solid #1e2d3d", borderRadius: 6, padding: "5px 8px", color: "#e6edf3", fontFamily: "'Space Mono', monospace", fontSize: 11, outline: "none" }} />
-                    <input value={tokenFilters[key].max} onChange={(e) => setTokenFilters((p) => ({ ...p, [key]: { ...p[key], max: e.target.value } }))} placeholder="Max" type="number"
-                      style={{ flex: 1, background: "#0d1117", border: "1px solid #1e2d3d", borderRadius: 6, padding: "5px 8px", color: "#e6edf3", fontFamily: "'Space Mono', monospace", fontSize: 11, outline: "none" }} />
-                  </div>
+          <div style={{ display: "flex", gap: 4, marginTop: 6 }}>
+  <input 
+    value={tokenFilters[key].min} 
+    onChange={(e) => setTokenFilters(p => ({...p, [key]: {...p[key], min: e.target.value}}))}
+    placeholder="Min" 
+    type="number"
+    style={{ 
+      flex: 1, minWidth: 0, width: "100%", // minWidth: 0 is the key fix
+      background: "#0d1117", border: "1px solid #1e2d3d", borderRadius: 6, 
+      padding: "6px 8px", color: "#e6edf3", fontSize: "11px", outline: "none" 
+    }} 
+  />
+  <input 
+    value={tokenFilters[key].max} 
+    onChange={(e) => setTokenFilters(p => ({...p, [key]: {...p[key], max: e.target.value}}))}
+    placeholder="Max" 
+    type="number"
+    style={{ 
+      flex: 1, minWidth: 0, width: "100%", 
+      background: "#0d1117", border: "1px solid #1e2d3d", borderRadius: 6, 
+      padding: "6px 8px", color: "#e6edf3", fontSize: "11px", outline: "none" 
+    }} 
+  />
+</div>
                 )}
               </div>
             ))}
@@ -347,8 +365,23 @@ export function TransactionsClient({
                 style={{ width: "100%", background: "#0d1117", border: "1px solid #1e2d3d", borderRadius: 6, padding: "7px 10px", color: "#e6edf3", fontFamily: "'Space Mono', monospace", fontSize: 11, outline: "none" }} />
             </div>
 
-            <div style={{ display: "flex", gap: 8 }}>
-              <button onClick={fetchData} style={{ flex: 1, background: "#f0b90b", color: "#000", border: "none", borderRadius: 6, padding: 8, fontWeight: 700, cursor: "pointer", fontSize: 12 }}>Apply</button>
+                          <div style={{ display: "flex", gap: 8 }}>
+              <button 
+  onClick={(e) => {
+    e.preventDefault();
+    setPage(1); 
+    fetchData(); 
+  }} 
+  style={{ 
+    flex: 1, background: "#f0b90b", color: "#000", border: "none", 
+    borderRadius: 6, padding: "10px", fontWeight: 800, cursor: "pointer", // Increased padding for better click area
+    fontSize: 12, transition: "opacity 0.2s"
+  }}
+  onMouseEnter={e => e.currentTarget.style.opacity = "0.8"}
+  onMouseLeave={e => e.currentTarget.style.opacity = "1"}
+>
+  Apply
+</button>
               <button onClick={resetFilters} style={{ flex: 1, background: "#0d1117", color: "#8b949e", border: "1px solid #1e2d3d", borderRadius: 6, padding: 8, fontWeight: 700, cursor: "pointer", fontSize: 12 }}>Reset</button>
             </div>
           </div>
@@ -378,8 +411,8 @@ export function TransactionsClient({
                   </tr>
                 </thead>
                 <tbody>
-                  {data.map((item: any) => (
-                    <tr key={item.hash || item.id} style={{ borderBottom: "1px solid #1e2d3d" }}
+                  {data.map((item: any, index: number) => (
+                      <tr key={`${item.hash}-${item.id}-${index}`} style={{ borderBottom: "1px solid #1e2d3d" }}
                       onMouseEnter={e => e.currentTarget.style.background = "#161e28"}
                       onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
                       <td style={{ padding: "11px 16px", fontSize: 12 }}>

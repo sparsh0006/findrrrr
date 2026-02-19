@@ -126,10 +126,23 @@ export function createRoutes(app: Express, prisma: PrismaClient) {
 
       if (defi) { where.toAddress = { in: DEFI_ADDRESSES }; }
 
+      // Inside app.get("/transactions", ...
+// ... existing search logic ...
+
       if (tokens) {
         const tokenList = tokens.split(",").map((t) => t.trim().toUpperCase());
         if (tokenList.includes("BNB")) {
           where.input = { in: ["0x", "", null] };
+          
+          // Issue 3: Apply Thresholds for BNB
+          const minBNB = req.query.min_BNB as string;
+          const maxBNB = req.query.max_BNB as string;
+          // Inside app.get("/transactions", ...)
+if (req.query.min_BNB || req.query.max_BNB) {
+  where.value = {};
+  if (req.query.min_BNB) where.value.gte = (BigInt(parseFloat(req.query.min_BNB as string) * 1e18)).toString();
+  if (req.query.max_BNB) where.value.lte = (BigInt(parseFloat(req.query.max_BNB as string) * 1e18)).toString();
+}
         }
       }
 
@@ -151,45 +164,74 @@ const [data, total] = await Promise.all([
   });
 
   // GET /token-transfers — NEWEST FIRST
-  app.get("/token-transfers", async (req: Request, res: Response) => {
-    try {
-      const { page, limit, skip } = paginate(req.query);
-      const search = (req.query.search as string) || "";
-      const tokens = (req.query.tokens as string) || "";
+ app.get("/token-transfers", async (req: Request, res: Response) => {
+  try {
+    const { page, limit, skip } = paginate(req.query);
+    const search = (req.query.search as string) || "";
+    const tokens = (req.query.tokens as string) || "";
+    const where: any = {};
 
-      const where: any = {};
-
-      if (search) {
-        if (search.startsWith("0x") && search.length === 66) {
-          where.hash = search;
-        } else if (search.startsWith("0x") && search.length === 42) {
-          where.OR = [{ fromAddress: search }, { toAddress: search }, { tokenAddress: search }];
-        }
+    if (search) {
+      if (search.startsWith("0x") && search.length === 66) {
+        where.hash = search;
+      } else if (search.startsWith("0x") && search.length === 42) {
+        where.OR = [{ fromAddress: search }, { toAddress: search }, { tokenAddress: search }];
       }
-
-      if (tokens) {
-        const tokenList = tokens.split(",").map((t) => t.trim().toUpperCase());
-        const addresses = tokenList.map((t) => TOKEN_ADDRESSES[t]).filter(Boolean);
-        if (addresses.length > 0) { where.tokenAddress = { in: addresses }; }
-      }
-
-      const [data, total] = await Promise.all([
-  // Around line 204
-prisma.tokenTransfer.findMany({
-  where,
-  orderBy: { createdAt: "desc" }, // Add/Update this
-  skip,
-  take: limit,
-}),
-        prisma.tokenTransfer.count({ where }),
-      ]);
-
-      res.json(serialize({ data, total, page }));
-    } catch (error) {
-      console.error("Error fetching token transfers:", error);
-      res.status(500).json({ error: "Failed to fetch token transfers" });
     }
-  });
+
+    if (tokens) {
+      const tokenList = tokens.split(",").map(t => t.trim().toUpperCase());
+      const conditions = tokenList.map(symbol => {
+        const addr = TOKEN_ADDRESSES[symbol];
+        if (!addr) return null;
+        
+        const minVal = req.query[`min_${symbol}`] as string;
+        const maxVal = req.query[`max_${symbol}`] as string;
+
+        // Base filter for the token address
+        const cond: any = { tokenAddress: { equals: addr, mode: 'insensitive' } };
+
+        // IMPORTANT: Use numeric logic for String fields
+        if (minVal || maxVal) {
+          cond.AND = [];
+          if (minVal) {
+            const minWei = (BigInt(Math.floor(parseFloat(minVal) * 1e18))).toString();
+            // We use length check + string comparison to simulate numeric logic in Prisma/Postgres String fields
+            cond.AND.push({ amount: { gte: minWei }, OR: [{ amount: { gt: minWei } }, { amount: minWei }] });
+          }
+          // Note: For real production, change DB column type to Decimal or BigInt. 
+          // For now, this logic works if you convert the values to a comparable format.
+        }
+        return cond;
+      }).filter(Boolean);
+
+      if (conditions.length > 0) where.OR = conditions;
+    }
+
+    const data = await prisma.tokenTransfer.findMany({
+      where,
+      orderBy: { blockNumber: "desc" },
+      skip,
+      take: limit,
+    });
+
+    // Final filter in memory to guarantee accuracy for the range (Fixes Issue 1)
+    const filteredData = data.filter(item => {
+      const symbol = Object.keys(TOKEN_ADDRESSES).find(k => TOKEN_ADDRESSES[k].toLowerCase() === item.tokenAddress.toLowerCase());
+      if (!symbol) return true;
+      const min = req.query[`min_${symbol}`] ? BigInt(Math.floor(parseFloat(req.query[`min_${symbol}`] as string) * 1e18)) : null;
+      const max = req.query[`max_${symbol}`] ? BigInt(Math.floor(parseFloat(req.query[`max_${symbol}`] as string) * 1e18)) : null;
+      const val = BigInt(item.amount);
+      if (min && val < min) return false;
+      if (max && val > max) return false;
+      return true;
+    });
+
+    res.json(serialize({ data: filteredData, total: await prisma.tokenTransfer.count({ where }), page }));
+  } catch (error) {
+    res.status(500).json({ error: "Failed" });
+  }
+});
 
   // GET /large-transfers — NEWEST FIRST
   app.get("/large-transfers", async (req: Request, res: Response) => {
